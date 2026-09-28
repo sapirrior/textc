@@ -10,10 +10,6 @@
 ### **The AI-Native Compiler for Mathematical & Logical Algorithms.**
 **Speak your algorithm in plain English &bull; Compiled via AI-native IR &bull; Executed with 100% mathematical precision.**
 
-```bash
-npm install -g text-compiler
-```
-
 ---
 
 </div>
@@ -48,6 +44,25 @@ flowchart LR
     style B fill:#1565c0,stroke:#64b5f6,color:#fff
     style C fill:#2e7d32,stroke:#81c784,color:#fff
     style D fill:#d84315,stroke:#ff8a65,color:#fff
+```
+
+---
+
+## 🚀 Quick Install
+
+### 🐧 Linux, 🍏 macOS & 📱 Android Termux
+```bash
+curl -fsSL https://raw.githubusercontent.com/sapirrior/textc/main/installer/install.sh | bash
+```
+
+### 🪟 Windows (PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/sapirrior/textc/main/installer/install.ps1 | iex
+```
+
+### 📦 Via npm
+```bash
+npm install -g text-compiler
 ```
 
 ---
@@ -150,30 +165,13 @@ true
 
 ---
 
-## 🚀 Get Started in 3 Steps
+## ⚙️ Configuration
 
-### Step 1: Install
-```bash
-npm install -g text-compiler
-```
-
-### Step 2: Set Your AI Key (Only used during compilation)
+Set your AI credentials once:
 ```bash
 export TEXTC_BASE_URL="https://api.openai.com/v1"
 export TEXTC_API_KEY="your-api-key"
 export TEXTC_MODEL_NAME="gpt-4o-mini"
-```
-
-### Step 3: Run Your First Algorithm!
-```bash
-# Write any math or logic prompt
-echo "Find the sum of all numbers from 1 to 100" > sum.txt
-
-# Run it directly!
-textc sum.txt --run
-```
-```
-5050
 ```
 
 ---
