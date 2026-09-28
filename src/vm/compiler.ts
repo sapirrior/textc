@@ -243,9 +243,8 @@ export class BytecodeCompiler {
             }
 
             case "FunctionDeclaration": {
-                const fnCompiler = new BytecodeCompiler();
                 const fnBodyChunk = new Chunk();
-                fnBodyChunk.constants = this.chunk.constants; // Share constants
+                fnBodyChunk.constants = this.chunk.constants; // Share global constants pool
 
                 // Define params in function scope
                 for (let i = stmt.parameters.length - 1; i >= 0; i--) {
@@ -254,19 +253,24 @@ export class BytecodeCompiler {
                     fnBodyChunk.emit(OpCode.OP_DEFINE_MUT, paramIdx, stmt.pos);
                 }
 
+                // Swap chunk to compile function body directly
+                const outerChunk = this.chunk;
+                const outerLoopStack = this.loopStack;
+                this.chunk = fnBodyChunk;
+                this.loopStack = [];
+
                 for (const bodyStmt of stmt.body) {
-                    const tempProg: Program = { type: "Program", body: [bodyStmt], pos: bodyStmt.pos };
-                    const compiled = fnCompiler.compile(tempProg);
-                    // Append all except the trailing halt
-                    for (let j = 0; j < compiled.instructions.length - 1; j++) {
-                        fnBodyChunk.instructions.push(compiled.instructions[j]!);
-                    }
+                    this.compileStatement(bodyStmt);
                 }
 
                 // Default return null if no return statement
                 const nullIdx = this.chunk.addConstant(null);
                 fnBodyChunk.emit(OpCode.OP_LOAD_CONST, nullIdx, stmt.pos);
                 fnBodyChunk.emit(OpCode.OP_RETURN, undefined, stmt.pos);
+
+                // Restore outer chunk
+                this.chunk = outerChunk;
+                this.loopStack = outerLoopStack;
 
                 const fnIndex = this.chunk.functions.length;
                 this.chunk.functions.push({
