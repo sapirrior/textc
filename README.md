@@ -1,7 +1,8 @@
-# ✨ TextC (Text Compiler)
+# ✨ textc (text-compiler)
 
 <div align="center">
 
+[![NPM Version](https://img.shields.io/npm/v/text-compiler.svg?color=cb3837)](https://www.npmjs.com/package/text-compiler)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Engine: Bun & Node](https://img.shields.io/badge/Engine-Bun%20%7C%20Node-black.svg)](https://bun.sh)
 [![Language: TypeScript](https://img.shields.io/badge/Language-TypeScript%205.x-blue.svg)](https://www.typescriptlang.org)
@@ -18,11 +19,11 @@
 
 ## 🌟 Product Review & Highlights
 
-> **"TextC bridges the gap between human algorithmic thought and deterministic binary execution."**
+> **"textc bridges the gap between human algorithmic thought and deterministic binary execution."**
 
 | Metric | Rating | Verdict |
 | :--- | :---: | :--- |
-| **🧠 AI Transpilation** | ⭐⭐⭐⭐⭐ | Translates fuzzy natural language instructions into strict, deterministic TextC IR. |
+| **🧠 AI Transpilation** | ⭐⭐⭐⭐⭐ | Translates fuzzy natural language instructions into strict, deterministic textc IR. |
 | **⚡ VM Performance** | ⭐⭐⭐⭐⭐ | Microsecond execution latency using an instruction-optimized stack machine. |
 | **🛡️ Memory Safety** | ⭐⭐⭐⭐⭐ | Immutable-by-default (`let` vs `mut`), bounds-checked arrays, and zero-division protection. |
 | **📦 Portability** | ⭐⭐⭐⭐⭐ | Generates standalone `.txtc` bytecode binaries running anywhere with zero dependencies. |
@@ -35,10 +36,10 @@
 ```mermaid
 flowchart LR
     A["🗣️ Natural Language\n/ Pseudocode (.txt)"] --> B["🤖 AI Frontend\n(Prompt Pipeline)"]
-    B --> C["📜 TextC IR\n(Grammar & AST)"]
+    B --> C["📜 textc IR\n(Grammar & AST)"]
     C --> D["⚙️ Bytecode Compiler\n(OpCodes & Chunk)"]
     D --> E["📦 Standalone Binary\n(.txtc File)"]
-    E --> F["🚀 TextC Virtual Machine\n(Stack Engine)"]
+    E --> F["🚀 textc Virtual Machine\n(Stack Engine)"]
     F --> G["💻 Deterministic Output\n(Console)"]
 
     style A fill:#4a148c,stroke:#ab47bc,color:#fff
@@ -54,13 +55,20 @@ flowchart LR
 
 ## 🚀 Quick Start
 
-### 1. Installation & Setup
+### 1. Installation via NPM
+
 ```bash
-# Clone the repository
+# Global installation
+npm install -g text-compiler
+
+# Or with bun
+bun install -g text-compiler
+```
+
+Or clone and build from source:
+```bash
 git clone https://github.com/sapirrior/textc.git
 cd textc
-
-# Install dependencies & build
 bun install
 bun run build
 ```
@@ -75,29 +83,29 @@ export TEXTC_MODEL_NAME="gpt-4o-mini"
 ### 3. Usage Guide
 ```bash
 # Compile a natural language algorithm into a .txtc bytecode binary:
-node dist/textc.js examples/fibonacci.txt
+textc examples/fibonacci.txt
 # => textc info compiling fibonacci.txt (target: textc-vm)
 # => textc info finished in 480ms
 # => textc info emitted bytecode: /path/to/fibonacci.txtc
 
 # Execute the precompiled .txtc binary directly on the VM:
-node dist/textc.js fibonacci.txtc
+textc fibonacci.txtc
 # => textc info running fibonacci.txtc on textc-vm
 # => 0, 1, 1, 2, 3, 5, 8, 13, 21, 34
 
 # Compile with custom output path:
-node dist/textc.js examples/collatz.txt -o collatz.txtc
+textc examples/collatz.txt -o collatz.txtc
 
 # Compile and immediately run in one command:
-node dist/textc.js examples/bubble_sort.txt --run
+textc examples/bubble_sort.txt --run
 
-# Emit pure TextC Intermediate Representation (IR):
-node dist/textc.js examples/fibonacci.txt --emit-ir
+# Emit pure textc Intermediate Representation (IR):
+textc examples/fibonacci.txt --emit-ir
 ```
 
 ---
 
-## 💡 Showcase: Natural Language to Machine Code
+## 💡 Showcase: Natural Language to Bytecode
 
 ### 🔹 Example 1: Collatz Conjecture
 **Input (`collatz.txt`):**
@@ -107,7 +115,7 @@ If even, divide by 2. If odd, multiply by 3 and add 1.
 Print each step and the total count.
 ```
 
-**Generated TextC IR:**
+**Generated textc IR:**
 ```rust
 mut n = 27;
 mut steps = 0;
@@ -143,7 +151,7 @@ Numbers: 64, 34, 25, 12, 22, 11, 90
 Sort the list in ascending order, reverse it, compute the sum, and print the top 3 items.
 ```
 
-**Generated TextC IR:**
+**Generated textc IR:**
 ```rust
 mut arr = [64, 34, 25, 12, 22, 11, 90];
 sort(arr);
@@ -159,7 +167,7 @@ println(top_three);
 
 ## 🛡️ Guaranteed Memory Safety
 
-TextC provides safety guarantees enforced at the compiler and VM levels:
+textc provides safety guarantees enforced at the compiler and VM levels:
 
 1. **Strict Immutability Invariant:**
    - Variables declared with `let` cannot be reassigned or mutated.
@@ -178,7 +186,7 @@ textc error input.txt:3:1 Cannot mutate immutable variable 'x'. Declare it with 
 
 ## 📦 The `.txtc` Bytecode Format
 
-TextC compiles to a standalone container format (`.txtc`):
+textc compiles to a standalone container format (`.txtc`):
 
 | Offset | Length | Field | Description |
 | :--- | :--- | :--- | :--- |
@@ -232,4 +240,4 @@ textc/
 
 ## 📜 License
 
-TextC is distributed under the [MIT License](LICENSE).
+textc is distributed under the [MIT License](LICENSE).

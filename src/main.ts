@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { existsSync, readFileSync } from "fs";
 import path from "path";
 import { generate } from "./ai";
