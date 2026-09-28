@@ -1,0 +1,9 @@
+Input:
+Array: [64, 34, 25, 12, 22, 11, 90]
+
+Steps:
+1. Let N be the length of Array.
+2. Repeat for i from 0 to N - 1:
+   a. Repeat for j from 0 to N - i - 2:
+      - If Array[j] > Array[j + 1], swap Array[j] and Array[j + 1].
+3. Output the sorted Array as a comma-separated list.

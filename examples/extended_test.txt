@@ -1,0 +1,8 @@
+Data:
+Numbers: [14, 28, 42]
+
+Algorithm:
+1. Find the GCD of the first two numbers (14 and 28).
+2. Find the GCD of that result and the third number (42).
+3. Compute 2 raised to the power of that overall GCD.
+4. Output the final result.

@@ -1,0 +1,9 @@
+Input:
+Text: "racecar"
+
+Procedure:
+1. Convert the text to all lowercase letters and remove spaces.
+2. Compare the first character with the last character.
+3. If they do not match, output "false" and exit.
+4. Move inward (second with second-to-last, etc.) and repeat until all characters are checked.
+5. If all matched, output "true".

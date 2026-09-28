@@ -1,0 +1,30 @@
+{
+  "name": "text-compiler",
+  "version": "0.1.1",
+  "description": "Execute small algorithms written in natural language, pseudocode, flow-style instructions, or any human-friendly form",
+  "homepage": "https://github.com/sapirrior/textc#readme",
+  "bugs": {
+    "url": "https://github.com/sapirrior/textc/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sapirrior/textc.git"
+  },
+  "license": "MIT",
+  "author": "sapirrior",
+  "type": "module",
+  "main": "dist/textc.js",
+  "scripts": {
+    "test": "echo \"No test specified\"",
+    "dev": "bun --watch ./src/main.ts",
+    "typecheck": "bun check ./src/main.ts",
+    "build": "bun build --target=node --outfile=dist/textc.js ./src/main.ts",
+    "start": "bun run dist/textc.js"
+  },
+  "dependencies": {
+    "openai": "^7.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3"
+  }
+}

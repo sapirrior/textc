@@ -1,0 +1,12 @@
+Data:
+N: 10
+
+Algorithm:
+1. If N <= 0, output 0 and stop.
+2. If N == 1, output 1 and stop.
+3. Set a = 0, b = 1.
+4. Loop from count = 2 to N:
+   - temp = a + b
+   - a = b
+   - b = temp
+5. Output b.

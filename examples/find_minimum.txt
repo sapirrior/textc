@@ -1,0 +1,8 @@
+Data:
+Numbers: 45, 12, 89, 7, 34, 23, 7
+
+Algorithm:
+1. Set 'min' to the first number in the list.
+2. For each number in the remaining list:
+   - If the number is smaller than 'min', update 'min' to this number.
+3. Output 'min'.

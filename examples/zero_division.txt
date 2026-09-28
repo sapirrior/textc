@@ -1,0 +1,7 @@
+Data:
+Values: 100, 0
+
+Steps:
+1. Take the first value.
+2. Divide it by the second value.
+3. Output the result.

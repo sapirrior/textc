@@ -1,0 +1,9 @@
+Data:
+Sentence: "The quick brown fox jumps over 13 lazy dogs and finds 7 bones"
+
+Algorithm:
+1. Extract all numbers from the sentence.
+2. Sum all the extracted numbers together.
+3. Count the total number of words in the sentence (words are separated by spaces, numbers count as words).
+4. Multiply the sum of the numbers by the total word count.
+5. Output only the final number.

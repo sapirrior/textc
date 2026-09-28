@@ -1,0 +1,10 @@
+Data:
+Number: 6
+
+Algorithm:
+1. Start with 'current' equal to Number, and 'steps' equal to 0.
+2. While 'current' is not 1:
+   - If 'current' is even, divide it by 2.
+   - Otherwise, multiply it by 3 and add 1.
+   - Increment 'steps' by 1.
+3. Output 'steps'.
