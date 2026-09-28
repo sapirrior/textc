@@ -17,10 +17,11 @@ export const GRAMMAR_RULES = `TEXTC IR GRAMMAR RULES:
 4. Functions:
    - fn name(arg1, arg2) { ... return value; }
 5. Operators:
-   - Arithmetic: +, -, *, /, %
+   - Arithmetic: + (add), - (sub), * (mul), / (true division), // (floor division), % (floored modulo), ** (power)
    - Comparisons: ==, !=, <, <=, >, >=
-   - Logical: and, or, not
-   - Strings & Comments: "text", // comment
+   - Logical: and, or, not (conditions MUST be boolean)
+   - Comments: # comment or /* block comment */
+   - Statements: Every statement MUST end with a semicolon (;)
 
 IMPORTANT MUTABILITY RULE:
 Every variable that is updated, reassigned, or incremented in a loop or branch MUST be declared with 'mut' (e.g. 'mut current = 6;', 'mut steps = 0;', 'mut sum = 0;').`;

@@ -8,6 +8,7 @@ import {
 } from "./types";
 import { RuntimeError, MemorySafetyError } from "./errors";
 import { Position } from "../ir/ast";
+import { BUILTINS_MAP, HostCtx, formatVmValue } from "../stdlib/registry";
 
 interface CallFrame {
     instructions: Instruction[];
@@ -162,6 +163,16 @@ export class VirtualMachine {
                 if (b === 0) {
                     throw new MemorySafetyError("Division by zero", instr.pos);
                 }
+                this.stack.push(a / b);
+                break;
+            }
+
+            case OpCode.OP_IDIV: {
+                const b = this.popNumber(instr.pos);
+                const a = this.popNumber(instr.pos);
+                if (b === 0) {
+                    throw new MemorySafetyError("Division by zero", instr.pos);
+                }
                 this.stack.push(Math.floor(a / b));
                 break;
             }
@@ -172,7 +183,17 @@ export class VirtualMachine {
                 if (b === 0) {
                     throw new MemorySafetyError("Modulo by zero", instr.pos);
                 }
-                this.stack.push(a % b);
+                // Floored modulo: sign follows divisor
+                const rem = a % b;
+                const flooredMod = rem !== 0 && (rem < 0 !== b < 0) ? rem + b : rem;
+                this.stack.push(flooredMod === 0 ? 0 : flooredMod);
+                break;
+            }
+
+            case OpCode.OP_POW: {
+                const b = this.popNumber(instr.pos);
+                const a = this.popNumber(instr.pos);
+                this.stack.push(Math.pow(a, b));
                 break;
             }
 
@@ -183,8 +204,8 @@ export class VirtualMachine {
             }
 
             case OpCode.OP_NOT: {
-                const a = this.popStack(instr.pos);
-                this.stack.push(!this.isTruthy(a));
+                const a = this.popBool(instr.pos);
+                this.stack.push(!a);
                 break;
             }
 
@@ -203,44 +224,44 @@ export class VirtualMachine {
             }
 
             case OpCode.OP_LT: {
-                const b = this.popNumber(instr.pos);
-                const a = this.popNumber(instr.pos);
-                this.stack.push(a < b);
+                const b = this.popStack(instr.pos);
+                const a = this.popStack(instr.pos);
+                this.stack.push(this.compareValues(a, b, "<", instr.pos));
                 break;
             }
 
             case OpCode.OP_LTE: {
-                const b = this.popNumber(instr.pos);
-                const a = this.popNumber(instr.pos);
-                this.stack.push(a <= b);
+                const b = this.popStack(instr.pos);
+                const a = this.popStack(instr.pos);
+                this.stack.push(this.compareValues(a, b, "<=", instr.pos));
                 break;
             }
 
             case OpCode.OP_GT: {
-                const b = this.popNumber(instr.pos);
-                const a = this.popNumber(instr.pos);
-                this.stack.push(a > b);
+                const b = this.popStack(instr.pos);
+                const a = this.popStack(instr.pos);
+                this.stack.push(this.compareValues(a, b, ">", instr.pos));
                 break;
             }
 
             case OpCode.OP_GTE: {
-                const b = this.popNumber(instr.pos);
-                const a = this.popNumber(instr.pos);
-                this.stack.push(a >= b);
+                const b = this.popStack(instr.pos);
+                const a = this.popStack(instr.pos);
+                this.stack.push(this.compareValues(a, b, ">=", instr.pos));
                 break;
             }
 
             case OpCode.OP_AND: {
-                const b = this.popStack(instr.pos);
-                const a = this.popStack(instr.pos);
-                this.stack.push(this.isTruthy(a) && this.isTruthy(b));
+                const b = this.popBool(instr.pos);
+                const a = this.popBool(instr.pos);
+                this.stack.push(a && b);
                 break;
             }
 
             case OpCode.OP_OR: {
-                const b = this.popStack(instr.pos);
-                const a = this.popStack(instr.pos);
-                this.stack.push(this.isTruthy(a) || this.isTruthy(b));
+                const b = this.popBool(instr.pos);
+                const a = this.popBool(instr.pos);
+                this.stack.push(a || b);
                 break;
             }
 
@@ -250,16 +271,16 @@ export class VirtualMachine {
             }
 
             case OpCode.OP_JUMP_IF_FALSE: {
-                const cond = this.popStack(instr.pos);
-                if (!this.isTruthy(cond)) {
+                const cond = this.popBool(instr.pos);
+                if (!cond) {
                     frame.ip = instr.operand!;
                 }
                 break;
             }
 
             case OpCode.OP_JUMP_IF_TRUE: {
-                const cond = this.popStack(instr.pos);
-                if (this.isTruthy(cond)) {
+                const cond = this.popBool(instr.pos);
+                if (cond) {
                     frame.ip = instr.operand!;
                 }
                 break;
@@ -281,7 +302,7 @@ export class VirtualMachine {
             }
 
             case OpCode.OP_GET_INDEX: {
-                const index = this.popNumber(instr.pos);
+                const index = this.popIndex(instr.pos);
                 const target = this.popStack(instr.pos);
 
                 if (Array.isArray(target)) {
@@ -308,7 +329,7 @@ export class VirtualMachine {
 
             case OpCode.OP_SET_INDEX: {
                 const val = this.popStack(instr.pos);
-                const index = this.popNumber(instr.pos);
+                const index = this.popIndex(instr.pos);
                 const target = this.popStack(instr.pos);
 
                 if (Array.isArray(target)) {
@@ -325,25 +346,106 @@ export class VirtualMachine {
                 break;
             }
 
+            case OpCode.OP_CALL_BUILTIN: {
+                const callInfo = chunk.constants[instr.operand!];
+                let name: string;
+                let argc: number;
+                if (typeof callInfo === "object" && callInfo !== null && "name" in callInfo) {
+                    name = (callInfo as any).name;
+                    argc = (callInfo as any).argc;
+                } else {
+                    name = callInfo as string;
+                    argc = 1;
+                }
+
+                const builtin = BUILTINS_MAP.get(name);
+                if (!builtin) {
+                    throw new RuntimeError(`Undefined built-in function '${name}'`, instr.pos);
+                }
+                if (argc < builtin.arity[0] || argc > builtin.arity[1]) {
+                    throw new RuntimeError(
+                        `Built-in '${name}' expects between ${builtin.arity[0]} and ${builtin.arity[1]} arguments, got ${argc}`,
+                        instr.pos
+                    );
+                }
+
+                const args: VmValue[] = [];
+                for (let i = 0; i < argc; i++) {
+                    args.unshift(this.popStack(instr.pos));
+                }
+
+                const ctx: HostCtx = {
+                    pos: instr.pos,
+                    print: (str) => this.outputBuffer.push(str),
+                    isEqual: (a, b) => this.isEqual(a, b),
+                };
+
+                const result = builtin.impl(args, ctx);
+                this.stack.push(result);
+                break;
+            }
+
+            case OpCode.OP_CALL: {
+                const callInfo = chunk.constants[instr.operand!];
+                let funcName: string;
+                let argc: number | undefined;
+                if (typeof callInfo === "object" && callInfo !== null && "name" in callInfo) {
+                    funcName = (callInfo as any).name;
+                    argc = (callInfo as any).argc;
+                } else {
+                    funcName = callInfo as string;
+                }
+
+                const binding = this.lookupVariable(funcName, frame);
+                if (!binding || typeof binding.value !== "object" || binding.value === null || (binding.value as VmFunction).type !== "function") {
+                    throw new RuntimeError(`Undefined function '${funcName}'`, instr.pos);
+                }
+                const fn = binding.value as VmFunction;
+                if (argc !== undefined && argc !== fn.arity) {
+                    throw new RuntimeError(
+                        `Function '${funcName}' expects ${fn.arity} arguments, got ${argc}`,
+                        instr.pos
+                    );
+                }
+                const fnDef = chunk.functions[fn.chunkIndex];
+                if (!fnDef) {
+                    throw new RuntimeError(`Internal error: function definition not found for '${funcName}'`, instr.pos);
+                }
+
+                const newEnv = new Map<string, VariableBinding>();
+                const newFrame: CallFrame = {
+                    instructions: fnDef.instructions,
+                    ip: 0,
+                    environment: newEnv,
+                };
+                this.callStack.push(newFrame);
+                break;
+            }
+
+            case OpCode.OP_RETURN: {
+                const retVal = this.popStack(instr.pos);
+                this.callStack.pop();
+                this.stack.push(retVal);
+                break;
+            }
+
+            case OpCode.OP_HALT: {
+                this.callStack = [];
+                break;
+            }
+
+            // Legacy array & math operations for backwards compatibility
             case OpCode.OP_ARRAY_PUSH: {
                 const item = this.popStack(instr.pos);
-                const arr = this.popStack(instr.pos);
-                if (!Array.isArray(arr)) {
-                    throw new RuntimeError("push() requires an array as first argument", instr.pos);
-                }
+                const arr = this.popArray(instr.pos);
                 arr.push(item);
                 this.stack.push(arr.length);
                 break;
             }
 
             case OpCode.OP_ARRAY_POP: {
-                const arr = this.popStack(instr.pos);
-                if (!Array.isArray(arr)) {
-                    throw new RuntimeError("pop() requires an array", instr.pos);
-                }
-                if (arr.length === 0) {
-                    throw new MemorySafetyError("Cannot pop from empty array", instr.pos);
-                }
+                const arr = this.popArray(instr.pos);
+                if (arr.length === 0) throw new MemorySafetyError("Cannot pop from empty array", instr.pos);
                 this.stack.push(arr.pop()!);
                 break;
             }
@@ -359,35 +461,35 @@ export class VirtualMachine {
             }
 
             case OpCode.OP_ARRAY_SORT: {
-                const arr = this.popStack(instr.pos);
-                if (!Array.isArray(arr)) {
-                    throw new RuntimeError("sort() requires an array", instr.pos);
+                const arr = this.popArray(instr.pos);
+                if (arr.length > 1) {
+                    const firstType = typeof arr[0];
+                    for (let i = 1; i < arr.length; i++) {
+                        if (typeof arr[i] !== firstType) {
+                            throw new RuntimeError(`sort() requires homogeneous elements, got '${firstType}' and '${typeof arr[i]}'`, instr.pos);
+                        }
+                    }
+                    arr.sort((a, b) => {
+                        if (typeof a === "number" && typeof b === "number") return a - b;
+                        if (typeof a === "string" && typeof b === "string") return a < b ? -1 : a > b ? 1 : 0;
+                        return 0;
+                    });
                 }
-                arr.sort((a, b) => {
-                    if (typeof a === "number" && typeof b === "number") return a - b;
-                    return String(a).localeCompare(String(b));
-                });
                 this.stack.push(arr);
                 break;
             }
 
             case OpCode.OP_ARRAY_REVERSE: {
-                const arr = this.popStack(instr.pos);
-                if (!Array.isArray(arr)) {
-                    throw new RuntimeError("reverse() requires an array", instr.pos);
-                }
+                const arr = this.popArray(instr.pos);
                 arr.reverse();
                 this.stack.push(arr);
                 break;
             }
 
             case OpCode.OP_ARRAY_SWAP: {
-                const j = this.popNumber(instr.pos);
-                const i = this.popNumber(instr.pos);
-                const arr = this.popStack(instr.pos);
-                if (!Array.isArray(arr)) {
-                    throw new RuntimeError("swap() requires an array", instr.pos);
-                }
+                const j = this.popIndex(instr.pos);
+                const i = this.popIndex(instr.pos);
+                const arr = this.popArray(instr.pos);
                 if (i < 0 || i >= arr.length || j < 0 || j >= arr.length) {
                     throw new MemorySafetyError(`swap() index out of bounds: [${i}, ${j}] for length ${arr.length}`, instr.pos);
                 }
@@ -399,13 +501,17 @@ export class VirtualMachine {
             }
 
             case OpCode.OP_ARRAY_SLICE: {
-                const end = this.popNumber(instr.pos);
-                const start = this.popNumber(instr.pos);
+                const end = this.popIndex(instr.pos);
+                const start = this.popIndex(instr.pos);
                 const target = this.popStack(instr.pos);
                 if (Array.isArray(target)) {
-                    this.stack.push(target.slice(start, end));
+                    const s = Math.max(0, Math.min(start, target.length));
+                    const e = Math.max(s, Math.min(end, target.length));
+                    this.stack.push(target.slice(s, e));
                 } else if (typeof target === "string") {
-                    this.stack.push(target.slice(start, end));
+                    const s = Math.max(0, Math.min(start, target.length));
+                    const e = Math.max(s, Math.min(end, target.length));
+                    this.stack.push(target.slice(s, e));
                 } else {
                     throw new RuntimeError("slice() requires an array or string", instr.pos);
                 }
@@ -441,7 +547,7 @@ export class VirtualMachine {
 
             case OpCode.OP_ARRAY_FILL: {
                 const val = this.popStack(instr.pos);
-                const count = this.popNumber(instr.pos);
+                const count = this.popIndex(instr.pos);
                 if (count < 0) {
                     throw new MemorySafetyError(`fill() requires a non-negative count: ${count}`, instr.pos);
                 }
@@ -451,10 +557,7 @@ export class VirtualMachine {
             }
 
             case OpCode.OP_ARRAY_SUM: {
-                const target = this.popStack(instr.pos);
-                if (!Array.isArray(target)) {
-                    throw new RuntimeError("sum() requires an array", instr.pos);
-                }
+                const target = this.popArray(instr.pos);
                 let total = 0;
                 for (const item of target) {
                     if (typeof item !== "number") {
@@ -474,43 +577,8 @@ export class VirtualMachine {
 
             case OpCode.OP_PRINT: {
                 const val = this.popStack(instr.pos);
-                const str = this.formatValue(val);
+                const str = formatVmValue(val);
                 this.outputBuffer.push(str);
-                break;
-            }
-
-            case OpCode.OP_CALL: {
-                const funcName = chunk.constants[instr.operand!] as string;
-                const binding = this.lookupVariable(funcName, frame);
-                if (!binding || typeof binding.value !== "object" || binding.value === null || (binding.value as VmFunction).type !== "function") {
-                    throw new RuntimeError(`Undefined function '${funcName}'`, instr.pos);
-                }
-                const fn = binding.value as VmFunction;
-                const fnDef = chunk.functions[fn.chunkIndex];
-                if (!fnDef) {
-                    throw new RuntimeError(`Internal error: function definition not found for '${funcName}'`, instr.pos);
-                }
-
-                const newEnv = new Map<string, VariableBinding>();
-                // Arguments are on the stack, already popped in function prologue
-                const newFrame: CallFrame = {
-                    instructions: fnDef.instructions,
-                    ip: 0,
-                    environment: newEnv,
-                };
-                this.callStack.push(newFrame);
-                break;
-            }
-
-            case OpCode.OP_RETURN: {
-                const retVal = this.popStack(instr.pos);
-                this.callStack.pop();
-                this.stack.push(retVal);
-                break;
-            }
-
-            case OpCode.OP_HALT: {
-                this.callStack = [];
                 break;
             }
         }
@@ -521,7 +589,7 @@ export class VirtualMachine {
             case "sqrt": {
                 const n = this.popNumber(pos);
                 if (n < 0) throw new MemorySafetyError("Cannot calculate sqrt of negative number", pos);
-                this.stack.push(Math.floor(Math.sqrt(n)));
+                this.stack.push(Math.sqrt(n));
                 break;
             }
             case "abs": {
@@ -556,6 +624,22 @@ export class VirtualMachine {
                 this.stack.push(Math.round(n));
                 break;
             }
+            case "sin": {
+                const n = this.popNumber(pos);
+                this.stack.push(Math.sin(n));
+                break;
+            }
+            case "cos": {
+                const n = this.popNumber(pos);
+                this.stack.push(Math.cos(n));
+                break;
+            }
+            case "log": {
+                const n = this.popNumber(pos);
+                if (n <= 0) throw new RuntimeError("log() of non-positive number", pos);
+                this.stack.push(Math.log(n));
+                break;
+            }
             case "pow": {
                 const exponent = this.popNumber(pos);
                 const base = this.popNumber(pos);
@@ -574,14 +658,14 @@ export class VirtualMachine {
         return this.globalEnv.get(name);
     }
 
-    private popStack(pos: Position): VmValue {
+    private popStack(pos?: Position): VmValue {
         if (this.stack.length === 0) {
             throw new RuntimeError("Stack underflow", pos);
         }
         return this.stack.pop()!;
     }
 
-    private popNumber(pos: Position): number {
+    private popNumber(pos?: Position): number {
         const val = this.popStack(pos);
         if (typeof val !== "number") {
             throw new RuntimeError(`Expected number, got '${typeof val}'`, pos);
@@ -589,9 +673,45 @@ export class VirtualMachine {
         return val;
     }
 
-    private isTruthy(val: VmValue): boolean {
-        if (val === null || val === false || val === 0 || val === "") return false;
-        return true;
+    private popIndex(pos?: Position): number {
+        const val = this.popStack(pos);
+        if (typeof val !== "number" || !Number.isInteger(val)) {
+            throw new RuntimeError(`Expected integer index, got '${typeof val === "number" ? val : typeof val}'`, pos);
+        }
+        return val;
+    }
+
+    private popBool(pos?: Position): boolean {
+        const val = this.popStack(pos);
+        if (typeof val !== "boolean") {
+            throw new RuntimeError(`Condition must be boolean, got '${typeof val}'`, pos);
+        }
+        return val;
+    }
+
+    private popArray(pos?: Position): VmValue[] {
+        const val = this.popStack(pos);
+        if (!Array.isArray(val)) {
+            throw new RuntimeError(`Expected array, got '${typeof val}'`, pos);
+        }
+        return val;
+    }
+
+    private compareValues(a: VmValue, b: VmValue, op: "<" | "<=" | ">" | ">=", pos?: Position): boolean {
+        if (typeof a === "number" && typeof b === "number") {
+            if (op === "<") return a < b;
+            if (op === "<=") return a <= b;
+            if (op === ">") return a > b;
+            if (op === ">=") return a >= b;
+        }
+        if (typeof a === "string" && typeof b === "string") {
+            // Unicode code point order
+            if (op === "<") return a < b;
+            if (op === "<=") return a <= b;
+            if (op === ">") return a > b;
+            if (op === ">=") return a >= b;
+        }
+        throw new RuntimeError(`Cannot compare '${typeof a}' and '${typeof b}'`, pos);
     }
 
     private isEqual(a: VmValue, b: VmValue): boolean {
@@ -604,14 +724,5 @@ export class VirtualMachine {
             return true;
         }
         return false;
-    }
-
-    private formatValue(val: VmValue): string {
-        if (val === null) return "null";
-        if (typeof val === "boolean") return val ? "true" : "false";
-        if (Array.isArray(val)) {
-            return `[${val.map((v) => this.formatValue(v)).join(", ")}]`;
-        }
-        return String(val);
     }
 }

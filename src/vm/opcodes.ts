@@ -20,6 +20,8 @@ export enum OpCode {
     OP_DIV = 0x23,
     OP_MOD = 0x24,
     OP_NEG = 0x25,
+    OP_POW = 0x26,
+    OP_IDIV = 0x27,
 
     // Comparison Operations
     OP_EQ = 0x30,
@@ -40,9 +42,10 @@ export enum OpCode {
     OP_JUMP_IF_TRUE = 0x52,
     OP_LOOP = 0x53,
 
-    // Functions
+    // Functions & Built-ins
     OP_CALL = 0x60,
     OP_RETURN = 0x61,
+    OP_CALL_BUILTIN = 0x62,
 
     // Data Structures (Arrays & Strings)
     OP_BUILD_ARRAY = 0x70,
@@ -60,7 +63,7 @@ export enum OpCode {
     OP_ARRAY_FILL = 0x7c,
     OP_ARRAY_SUM = 0x7d,
 
-    // Built-in Math & System Calls
+    // Legacy Math & Print
     OP_MATH_CALL = 0x80,
     OP_PRINT = 0x90,
 

@@ -1,6 +1,6 @@
 {
   "name": "text-compiler",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Execute small algorithms written in natural language, pseudocode, flow-style instructions, or any human-friendly form",
   "homepage": "https://github.com/sapirrior/textc#readme",
   "bugs": {
@@ -34,6 +34,7 @@
   ],
   "scripts": {
     "test": "bun test",
+    "probe": "bun test tests/regression/",
     "dev": "bun --watch ./src/main.ts",
     "typecheck": "bun check ./src/main.ts",
     "build": "bun build --target=node --outfile=dist/textc.js ./src/main.ts && chmod +x dist/textc.js",

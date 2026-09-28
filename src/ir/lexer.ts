@@ -17,6 +17,7 @@ export type TokenType =
     | "NOT"
     | "TRUE"
     | "FALSE"
+    | "NULL"
     | "IDENTIFIER"
     | "NUMBER"
     | "STRING"
@@ -24,7 +25,9 @@ export type TokenType =
     | "PLUS"
     | "MINUS"
     | "STAR"
+    | "STARSTAR"
     | "SLASH"
+    | "SLASHSLASH"
     | "PERCENT"
     | "EQ"
     | "NEQ"
@@ -33,6 +36,7 @@ export type TokenType =
     | "GT"
     | "GTE"
     | "DOTDOT"
+    | "DOTDOTEQ"
     | "COMMA"
     | "SEMICOLON"
     | "LPAREN"
@@ -47,6 +51,18 @@ export interface Token {
     type: TokenType;
     value: string;
     pos: Position;
+}
+
+export class LexError extends Error {
+    public pos: Position;
+    public hint?: string;
+
+    constructor(message: string, pos: Position, hint?: string) {
+        super(`${message} at ${pos.line}:${pos.column}`);
+        this.name = "LexError";
+        this.pos = pos;
+        this.hint = hint;
+    }
 }
 
 const KEYWORDS: Record<string, TokenType> = {
@@ -66,6 +82,7 @@ const KEYWORDS: Record<string, TokenType> = {
     not: "NOT",
     true: "TRUE",
     false: "FALSE",
+    null: "NULL",
 };
 
 export class Lexer {
@@ -78,8 +95,8 @@ export class Lexer {
         this.source = source;
     }
 
-    private peek(): string {
-        return this.source[this.cursor] ?? "";
+    private peek(offset: number = 0): string {
+        return this.source[this.cursor + offset] ?? "";
     }
 
     private advance(): string {
@@ -107,13 +124,26 @@ export class Lexer {
             const char = this.peek();
             if (char === " " || char === "\t" || char === "\r" || char === "\n") {
                 this.advance();
-            } else if (char === "/" && this.source[this.cursor + 1] === "/") {
-                while (this.cursor < this.source.length && this.peek() !== "\n") {
-                    this.advance();
-                }
             } else if (char === "#") {
                 while (this.cursor < this.source.length && this.peek() !== "\n") {
                     this.advance();
+                }
+            } else if (char === "/" && this.peek(1) === "*") {
+                const startPos = { line: this.line, column: this.column };
+                this.advance(); // /
+                this.advance(); // *
+                let closed = false;
+                while (this.cursor < this.source.length) {
+                    if (this.peek() === "*" && this.peek(1) === "/") {
+                        this.advance();
+                        this.advance();
+                        closed = true;
+                        break;
+                    }
+                    this.advance();
+                }
+                if (!closed) {
+                    throw new LexError("Unterminated block comment", startPos, "Close comment with '*/'");
                 }
             } else {
                 break;
@@ -135,8 +165,14 @@ export class Lexer {
         // Single & multi-character operators
         if (char === "+") return { type: "PLUS", value: "+", pos: startPos };
         if (char === "-") return { type: "MINUS", value: "-", pos: startPos };
-        if (char === "*") return { type: "STAR", value: "*", pos: startPos };
-        if (char === "/") return { type: "SLASH", value: "/", pos: startPos };
+        if (char === "*") {
+            if (this.match("*")) return { type: "STARSTAR", value: "**", pos: startPos };
+            return { type: "STAR", value: "*", pos: startPos };
+        }
+        if (char === "/") {
+            if (this.match("/")) return { type: "SLASHSLASH", value: "//", pos: startPos };
+            return { type: "SLASH", value: "/", pos: startPos };
+        }
         if (char === "%") return { type: "PERCENT", value: "%", pos: startPos };
         if (char === ",") return { type: "COMMA", value: ",", pos: startPos };
         if (char === ";") return { type: "SEMICOLON", value: ";", pos: startPos };
@@ -149,8 +185,12 @@ export class Lexer {
 
         if (char === ".") {
             if (this.match(".")) {
+                if (this.match("=")) {
+                    return { type: "DOTDOTEQ", value: "..=", pos: startPos };
+                }
                 return { type: "DOTDOT", value: "..", pos: startPos };
             }
+            throw new LexError(`Unexpected character '.'`, startPos, "Ranges use '..' or '..='");
         }
 
         if (char === "=") {
@@ -160,7 +200,7 @@ export class Lexer {
 
         if (char === "!") {
             if (this.match("=")) return { type: "NEQ", value: "!=", pos: startPos };
-            return { type: "NOT", value: "not", pos: startPos };
+            throw new LexError(`Unexpected '!' operator`, startPos, "Use 'not' for logical negation");
         }
 
         if (char === "<") {
@@ -185,42 +225,94 @@ export class Lexer {
         if (char === '"' || char === "'") {
             const quote = char;
             let strValue = "";
-            while (this.cursor < this.source.length && this.peek() !== quote) {
-                if (this.peek() === "\\") {
+            let closed = false;
+            while (this.cursor < this.source.length) {
+                const nextCh = this.peek();
+                if (nextCh === quote) {
+                    this.advance();
+                    closed = true;
+                    break;
+                }
+                if (nextCh === "\n") {
+                    throw new LexError("Unterminated string literal", startPos, `String must be closed with ${quote}`);
+                }
+                if (nextCh === "\\") {
                     this.advance();
                     const escaped = this.advance();
                     if (escaped === "n") strValue += "\n";
                     else if (escaped === "t") strValue += "\t";
+                    else if (escaped === "r") strValue += "\r";
+                    else if (escaped === "\\") strValue += "\\";
+                    else if (escaped === '"') strValue += '"';
+                    else if (escaped === "'") strValue += "'";
                     else strValue += escaped;
                 } else {
                     strValue += this.advance();
                 }
             }
-            if (this.peek() === quote) {
-                this.advance();
+            if (!closed) {
+                throw new LexError("Unterminated string literal", startPos, `String must be closed with ${quote}`);
             }
             return { type: "STRING", value: strValue, pos: startPos };
         }
 
-        // Numbers: integers and floats
+        // Numbers: integers, floats, hex (0x), binary (0b), scientific notation (1e3), underscores (1_000)
         if (/\d/.test(char)) {
             let numStr = char;
-            while (/\d/.test(this.peek())) {
-                numStr += this.advance();
+            if (char === "0" && (this.peek() === "x" || this.peek() === "X")) {
+                numStr += this.advance(); // 'x'
+                while (/[0-9a-fA-F_]/.test(this.peek())) {
+                    const c = this.advance();
+                    if (c !== "_") numStr += c;
+                }
+                return { type: "NUMBER", value: numStr, pos: startPos };
             }
-            if (this.peek() === "." && /\d/.test(this.source[this.cursor + 1] ?? "")) {
+            if (char === "0" && (this.peek() === "b" || this.peek() === "B")) {
+                numStr += this.advance(); // 'b'
+                while (/[01_]/.test(this.peek())) {
+                    const c = this.advance();
+                    if (c !== "_") numStr += c;
+                }
+                return { type: "NUMBER", value: numStr, pos: startPos };
+            }
+
+            while (/[\d_]/.test(this.peek())) {
+                const c = this.advance();
+                if (c !== "_") numStr += c;
+            }
+
+            // Decimal dot (ensure not part of '..' range)
+            if (this.peek() === "." && /\d/.test(this.peek(1))) {
                 numStr += this.advance(); // '.'
-                while (/\d/.test(this.peek())) {
-                    numStr += this.advance();
+                while (/[\d_]/.test(this.peek())) {
+                    const c = this.advance();
+                    if (c !== "_") numStr += c;
                 }
             }
+
+            // Scientific exponent: e / E with optional + or -
+            if (this.peek() === "e" || this.peek() === "E") {
+                let expStr = this.advance();
+                if (this.peek() === "+" || this.peek() === "-") {
+                    expStr += this.advance();
+                }
+                if (!/\d/.test(this.peek())) {
+                    throw new LexError(`Invalid scientific notation '${numStr + expStr}'`, startPos, "Expected exponent digits");
+                }
+                while (/[\d_]/.test(this.peek())) {
+                    const c = this.advance();
+                    if (c !== "_") expStr += c;
+                }
+                numStr += expStr;
+            }
+
             return { type: "NUMBER", value: numStr, pos: startPos };
         }
 
-        // Identifiers and keywords
-        if (/[a-zA-Z_]/.test(char)) {
+        // Identifiers and keywords (including Unicode letters)
+        if (/[_\p{L}]/u.test(char)) {
             let ident = char;
-            while (/[a-zA-Z0-9_]/.test(this.peek())) {
+            while (/[_\p{L}\p{N}]/u.test(this.peek())) {
                 ident += this.advance();
             }
             const keywordType = KEYWORDS[ident];
@@ -230,7 +322,7 @@ export class Lexer {
             return { type: "IDENTIFIER", value: ident, pos: startPos };
         }
 
-        throw new Error(`Unexpected character '${char}' at ${startPos.line}:${startPos.column}`);
+        throw new LexError(`Unexpected character '${char}'`, startPos);
     }
 
     public tokenize(): Token[] {

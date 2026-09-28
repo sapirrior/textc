@@ -5,9 +5,9 @@ import { BytecodeCompiler, Chunk, BytecodeCompilationError } from "../src/vm";
 describe("Bytecode Compiler & .txtc Serialization", () => {
     test("compiles program AST to chunk with correct instructions", () => {
         const source = `
-        let a = 42
-        mut b = 10
-        let c = a + b
+        let a = 42;
+        mut b = 10;
+        let c = a + b;
         `;
         const ast = new Parser(source).parse();
         const compiler = new BytecodeCompiler();
@@ -22,9 +22,9 @@ describe("Bytecode Compiler & .txtc Serialization", () => {
 
     test("encodes chunk into valid binary .txtc format with magic header", () => {
         const source = `
-        mut count = 0
+        mut count = 0;
         while count < 5 {
-            count = count + 1
+            count = count + 1;
         }
         `;
         const ast = new Parser(source).parse();
@@ -40,12 +40,13 @@ describe("Bytecode Compiler & .txtc Serialization", () => {
 
     test("decodes binary .txtc format back into Chunk lossless", () => {
         const source = `
-        mut arr = [1, 2, 3]
-        push(arr, 4)
-        print(len(arr))
+        mut arr = [1, 2, 3];
+        push(arr, 4);
+        print(len(arr));
         `;
         const ast = new Parser(source).parse();
-        const chunk = new BytecodeCompiler().compile(ast);
+        const compiler = new BytecodeCompiler();
+        const chunk = compiler.compile(ast);
         const encoded = chunk.encode();
 
         const decoded = Chunk.decode(encoded);

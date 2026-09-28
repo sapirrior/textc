@@ -55,6 +55,8 @@ export type BinaryOperator =
     | "-"
     | "*"
     | "/"
+    | "//"
+    | "**"
     | "%"
     | "=="
     | "!="
@@ -96,6 +98,7 @@ export interface RangeExpression extends BaseNode {
     type: "RangeExpression";
     start: Expression;
     end: Expression;
+    inclusive?: boolean;
 }
 
 // ==========================================
@@ -113,7 +116,8 @@ export type Statement =
     | ReturnStatement
     | BreakStatement
     | ContinueStatement
-    | ExpressionStatement;
+    | ExpressionStatement
+    | EmptyStatement;
 
 export interface LetStatement extends BaseNode {
     type: "LetStatement";
@@ -176,6 +180,10 @@ export interface ContinueStatement extends BaseNode {
 export interface ExpressionStatement extends BaseNode {
     type: "ExpressionStatement";
     expression: Expression;
+}
+
+export interface EmptyStatement extends BaseNode {
+    type: "EmptyStatement";
 }
 
 export interface Program extends BaseNode {

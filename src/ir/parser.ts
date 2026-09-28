@@ -7,16 +7,19 @@ import {
     UnaryOperator,
     Identifier,
     IndexExpression,
+    RangeExpression,
 } from "./ast";
-import { Lexer, Token, TokenType } from "./lexer";
+import { Lexer, Token, TokenType, LexError } from "./lexer";
 
 export class ParseError extends Error {
     public pos: Position;
+    public hint?: string;
 
-    constructor(message: string, pos: Position) {
+    constructor(message: string, pos: Position, hint?: string) {
         super(`${message} at ${pos.line}:${pos.column}`);
         this.name = "ParseError";
         this.pos = pos;
+        this.hint = hint;
     }
 }
 
@@ -27,7 +30,14 @@ export class Parser {
     constructor(sourceOrTokens: string | Token[]) {
         if (typeof sourceOrTokens === "string") {
             const lexer = new Lexer(sourceOrTokens);
-            this.tokens = lexer.tokenize();
+            try {
+                this.tokens = lexer.tokenize();
+            } catch (err) {
+                if (err instanceof LexError) {
+                    throw new ParseError(err.message, err.pos, err.hint);
+                }
+                throw err;
+            }
         } else {
             this.tokens = sourceOrTokens;
         }
@@ -65,14 +75,18 @@ export class Parser {
         return false;
     }
 
-    private consume(type: TokenType, message: string): Token {
+    private consume(type: TokenType, message: string, hint?: string): Token {
         if (this.check(type)) return this.advance();
         const currentToken = this.peek();
-        throw new ParseError(message, currentToken.pos);
+        throw new ParseError(message, currentToken.pos, hint);
     }
 
-    private matchSemicolon(): void {
-        this.match("SEMICOLON");
+    private consumeSemicolon(afterWhat: string): void {
+        if (this.match("SEMICOLON")) {
+            return;
+        }
+        const currentToken = this.peek();
+        throw new ParseError(`Expected ';' after ${afterWhat}`, currentToken.pos, "Add ';' at the end of the statement");
     }
 
     public parse(): Program {
@@ -80,6 +94,10 @@ export class Parser {
         const statements: Statement[] = [];
 
         while (!this.isAtEnd()) {
+            if (this.match("SEMICOLON")) {
+                // Empty statement (e.g. ;;), ignore
+                continue;
+            }
             statements.push(this.statement());
         }
 
@@ -109,7 +127,7 @@ export class Parser {
         const nameToken = this.consume("IDENTIFIER", "Expected variable name after 'let'");
         this.consume("ASSIGN", "Expected '=' in variable declaration");
         const value = this.expression();
-        this.matchSemicolon();
+        this.consumeSemicolon("variable declaration");
 
         return {
             type: "LetStatement",
@@ -124,7 +142,7 @@ export class Parser {
         const nameToken = this.consume("IDENTIFIER", "Expected variable name after 'mut'");
         this.consume("ASSIGN", "Expected '=' in mutable variable declaration");
         const value = this.expression();
-        this.matchSemicolon();
+        this.consumeSemicolon("mutable variable declaration");
 
         return {
             type: "MutStatement",
@@ -142,6 +160,7 @@ export class Parser {
         const parameters: string[] = [];
         if (!this.check("RPAREN")) {
             do {
+                if (this.check("RPAREN")) break;
                 if (this.match("MUT")) {
                     // allow optional mut keyword in parameter list
                 }
@@ -154,9 +173,11 @@ export class Parser {
 
         const body: Statement[] = [];
         while (!this.check("RBRACE") && !this.isAtEnd()) {
+            if (this.match("SEMICOLON")) continue;
             body.push(this.statement());
         }
         this.consume("RBRACE", "Expected '}' after function body");
+        this.match("SEMICOLON"); // optional trailing semicolon after function block
 
         return {
             type: "FunctionDeclaration",
@@ -174,6 +195,7 @@ export class Parser {
 
         const consequent: Statement[] = [];
         while (!this.check("RBRACE") && !this.isAtEnd()) {
+            if (this.match("SEMICOLON")) continue;
             consequent.push(this.statement());
         }
         this.consume("RBRACE", "Expected '}' after if block");
@@ -186,11 +208,13 @@ export class Parser {
                 this.consume("LBRACE", "Expected '{' after 'else'");
                 alternate = [];
                 while (!this.check("RBRACE") && !this.isAtEnd()) {
+                    if (this.match("SEMICOLON")) continue;
                     alternate.push(this.statement());
                 }
                 this.consume("RBRACE", "Expected '}' after else block");
             }
         }
+        this.match("SEMICOLON"); // optional trailing semicolon after block
 
         return {
             type: "IfStatement",
@@ -208,9 +232,11 @@ export class Parser {
 
         const body: Statement[] = [];
         while (!this.check("RBRACE") && !this.isAtEnd()) {
+            if (this.match("SEMICOLON")) continue;
             body.push(this.statement());
         }
         this.consume("RBRACE", "Expected '}' after while block");
+        this.match("SEMICOLON"); // optional trailing semicolon after block
 
         return {
             type: "WhileStatement",
@@ -224,14 +250,18 @@ export class Parser {
         const pos = this.previous().pos;
         const varToken = this.consume("IDENTIFIER", "Expected loop variable name after 'for'");
         this.consume("IN", "Expected 'in' after for loop variable");
-        const iterable = this.expression();
+
+        // Parse iterable, supporting ranges in for-loops
+        const iterable = this.forIterable();
         this.consume("LBRACE", "Expected '{' after for loop iterable");
 
         const body: Statement[] = [];
         while (!this.check("RBRACE") && !this.isAtEnd()) {
+            if (this.match("SEMICOLON")) continue;
             body.push(this.statement());
         }
         this.consume("RBRACE", "Expected '}' after for block");
+        this.match("SEMICOLON"); // optional trailing semicolon after block
 
         return {
             type: "ForStatement",
@@ -242,13 +272,29 @@ export class Parser {
         };
     }
 
+    private forIterable(): Expression {
+        const start = this.expression();
+        if (this.match("DOTDOT", "DOTDOTEQ")) {
+            const opToken = this.previous();
+            const end = this.expression();
+            return {
+                type: "RangeExpression",
+                start,
+                end,
+                inclusive: opToken.type === "DOTDOTEQ",
+                pos: opToken.pos,
+            };
+        }
+        return start;
+    }
+
     private returnStatement(): Statement {
         const pos = this.previous().pos;
         let argument: Expression | undefined;
         if (!this.check("SEMICOLON") && !this.check("RBRACE")) {
             argument = this.expression();
         }
-        this.matchSemicolon();
+        this.consumeSemicolon("return statement");
 
         return {
             type: "ReturnStatement",
@@ -259,13 +305,13 @@ export class Parser {
 
     private breakStatement(): Statement {
         const pos = this.previous().pos;
-        this.matchSemicolon();
+        this.consumeSemicolon("break statement");
         return { type: "BreakStatement", pos };
     }
 
     private continueStatement(): Statement {
         const pos = this.previous().pos;
-        this.matchSemicolon();
+        this.consumeSemicolon("continue statement");
         return { type: "ContinueStatement", pos };
     }
 
@@ -276,7 +322,7 @@ export class Parser {
         if (this.match("ASSIGN")) {
             if (expr.type === "Identifier" || expr.type === "IndexExpression") {
                 const value = this.expression();
-                this.matchSemicolon();
+                this.consumeSemicolon("assignment statement");
                 return {
                     type: "AssignmentStatement",
                     target: expr as Identifier | IndexExpression,
@@ -287,7 +333,7 @@ export class Parser {
             throw new ParseError("Invalid assignment target", pos);
         }
 
-        this.matchSemicolon();
+        this.consumeSemicolon("expression");
         return {
             type: "ExpressionStatement",
             expression: expr,
@@ -300,22 +346,7 @@ export class Parser {
     // ==========================================
 
     private expression(): Expression {
-        return this.range();
-    }
-
-    private range(): Expression {
-        const left = this.logicalOr();
-        if (this.match("DOTDOT")) {
-            const pos = this.previous().pos;
-            const right = this.logicalOr();
-            return {
-                type: "RangeExpression",
-                start: left,
-                end: right,
-                pos,
-            };
-        }
-        return left;
+        return this.logicalOr();
     }
 
     private logicalOr(): Expression {
@@ -367,11 +398,25 @@ export class Parser {
         return left;
     }
 
+    private isComparisonOp(op: string): boolean {
+        return op === "<" || op === "<=" || op === ">" || op === ">=";
+    }
+
     private comparison(): Expression {
         let left = this.term();
         while (this.match("LT", "LTE", "GT", "GTE")) {
             const opToken = this.previous();
             const operator = opToken.value as BinaryOperator;
+
+            // Check for chained comparison e.g. 1 < 2 < 3
+            if (left.type === "BinaryExpression" && this.isComparisonOp(left.operator)) {
+                throw new ParseError(
+                    "Chained comparisons are not supported",
+                    opToken.pos,
+                    `Use 'a ${left.operator} b and b ${operator} c' instead`
+                );
+            }
+
             const right = this.term();
             left = {
                 type: "BinaryExpression",
@@ -402,14 +447,30 @@ export class Parser {
     }
 
     private factor(): Expression {
-        let left = this.unary();
-        while (this.match("STAR", "SLASH", "PERCENT")) {
+        let left = this.power();
+        while (this.match("STAR", "SLASH", "SLASHSLASH", "PERCENT")) {
             const opToken = this.previous();
             const operator = opToken.value as BinaryOperator;
-            const right = this.unary();
+            const right = this.power();
             left = {
                 type: "BinaryExpression",
                 operator,
+                left,
+                right,
+                pos: opToken.pos,
+            };
+        }
+        return left;
+    }
+
+    private power(): Expression {
+        let left = this.unary();
+        if (this.match("STARSTAR")) {
+            const opToken = this.previous();
+            const right = this.power(); // Right-associative exponentiation
+            return {
+                type: "BinaryExpression",
+                operator: "**",
                 left,
                 right,
                 pos: opToken.pos,
@@ -444,6 +505,7 @@ export class Parser {
                 const args: Expression[] = [];
                 if (!this.check("RPAREN")) {
                     do {
+                        if (this.check("RPAREN")) break;
                         args.push(this.expression());
                     } while (this.match("COMMA"));
                 }
@@ -471,13 +533,28 @@ export class Parser {
         return expr;
     }
 
+    private parseNumericLiteral(raw: string, pos: Position): number {
+        const clean = raw.replace(/_/g, "");
+        if (clean.startsWith("0x") || clean.startsWith("0X")) {
+            return parseInt(clean, 16);
+        }
+        if (clean.startsWith("0b") || clean.startsWith("0B")) {
+            return parseInt(clean.slice(2), 2);
+        }
+        const parsed = Number(clean);
+        if (isNaN(parsed)) {
+            throw new ParseError(`Invalid number literal '${raw}'`, pos);
+        }
+        return parsed;
+    }
+
     private primary(): Expression {
         const token = this.peek();
 
         if (this.match("NUMBER")) {
             return {
                 type: "NumberLiteral",
-                value: parseFloat(token.value),
+                value: this.parseNumericLiteral(token.value, token.pos),
                 pos: token.pos,
             };
         }
@@ -518,6 +595,7 @@ export class Parser {
             const elements: Expression[] = [];
             if (!this.check("RBRACKET")) {
                 do {
+                    if (this.check("RBRACKET")) break;
                     elements.push(this.expression());
                 } while (this.match("COMMA"));
             }

@@ -7,19 +7,32 @@ import {
 import { Chunk } from "./chunk";
 import { OpCode } from "./opcodes";
 import { BytecodeCompilationError } from "./errors";
+import { BUILTINS_MAP } from "../stdlib/registry";
 
 interface LoopContext {
-    continueTarget: number;
+    continueTarget?: number;
+    continueJumps: number[];
     breakJumps: number[];
 }
 
 export class BytecodeCompiler {
     private chunk: Chunk = new Chunk();
     private loopStack: LoopContext[] = [];
+    private functionDepth: number = 0;
+    private declaredFunctions: Map<string, number> = new Map();
 
     public compile(program: Program): Chunk {
         this.chunk = new Chunk();
         this.loopStack = [];
+        this.functionDepth = 0;
+        this.declaredFunctions.clear();
+
+        // Hoist / pre-record function declarations
+        for (const stmt of program.body) {
+            if (stmt.type === "FunctionDeclaration") {
+                this.declaredFunctions.set(stmt.name, stmt.parameters.length);
+            }
+        }
 
         for (const stmt of program.body) {
             this.compileStatement(stmt);
@@ -31,6 +44,9 @@ export class BytecodeCompiler {
 
     private compileStatement(stmt: Statement): void {
         switch (stmt.type) {
+            case "EmptyStatement":
+                break;
+
             case "LetStatement": {
                 this.compileExpression(stmt.value);
                 const nameIdx = this.chunk.addConstant(stmt.name);
@@ -90,6 +106,7 @@ export class BytecodeCompiler {
                 const loopStart = this.chunk.instructions.length;
                 const loopCtx: LoopContext = {
                     continueTarget: loopStart,
+                    continueJumps: [],
                     breakJumps: [],
                 };
                 this.loopStack.push(loopCtx);
@@ -105,6 +122,10 @@ export class BytecodeCompiler {
                 const loopEnd = this.chunk.instructions.length;
                 this.chunk.patchJump(exitJump, loopEnd);
 
+                for (const continueJump of loopCtx.continueJumps) {
+                    this.chunk.patchJump(continueJump, loopStart);
+                }
+
                 for (const breakJump of loopCtx.breakJumps) {
                     this.chunk.patchJump(breakJump, loopEnd);
                 }
@@ -114,7 +135,6 @@ export class BytecodeCompiler {
             }
 
             case "ForStatement": {
-                // Compile iterable (e.g. range or array)
                 if (stmt.iterable.type === "RangeExpression") {
                     // let variable = start
                     this.compileExpression(stmt.iterable.start);
@@ -123,21 +143,25 @@ export class BytecodeCompiler {
 
                     // end bound temp
                     this.compileExpression(stmt.iterable.end);
-                    const endVarName = `__end_${stmt.variable}_${stmt.pos.line}`;
+                    const endVarName = `__end_${stmt.variable}_${stmt.pos.line}_${stmt.pos.column}`;
                     const endVarIdx = this.chunk.addConstant(endVarName);
                     this.chunk.emit(OpCode.OP_DEFINE_LET, endVarIdx, stmt.pos);
 
                     const loopStart = this.chunk.instructions.length;
                     const loopCtx: LoopContext = {
-                        continueTarget: loopStart,
+                        continueJumps: [],
                         breakJumps: [],
                     };
                     this.loopStack.push(loopCtx);
 
-                    // condition: variable < __end
+                    // condition: variable < __end (or <= if inclusive)
                     this.chunk.emit(OpCode.OP_GET_VAR, varIdx, stmt.pos);
                     this.chunk.emit(OpCode.OP_GET_VAR, endVarIdx, stmt.pos);
-                    this.chunk.emit(OpCode.OP_LT, undefined, stmt.pos);
+                    if (stmt.iterable.inclusive) {
+                        this.chunk.emit(OpCode.OP_LTE, undefined, stmt.pos);
+                    } else {
+                        this.chunk.emit(OpCode.OP_LT, undefined, stmt.pos);
+                    }
                     const exitJump = this.chunk.emit(OpCode.OP_JUMP_IF_FALSE, 0, stmt.pos);
 
                     for (const s of stmt.body) {
@@ -147,6 +171,7 @@ export class BytecodeCompiler {
                     // Increment variable: variable = variable + 1
                     const continueStep = this.chunk.instructions.length;
                     loopCtx.continueTarget = continueStep;
+
                     this.chunk.emit(OpCode.OP_GET_VAR, varIdx, stmt.pos);
                     const oneIdx = this.chunk.addConstant(1);
                     this.chunk.emit(OpCode.OP_LOAD_CONST, oneIdx, stmt.pos);
@@ -157,6 +182,10 @@ export class BytecodeCompiler {
                     const loopEnd = this.chunk.instructions.length;
                     this.chunk.patchJump(exitJump, loopEnd);
 
+                    for (const continueJump of loopCtx.continueJumps) {
+                        this.chunk.patchJump(continueJump, continueStep);
+                    }
+
                     for (const breakJump of loopCtx.breakJumps) {
                         this.chunk.patchJump(breakJump, loopEnd);
                     }
@@ -165,20 +194,20 @@ export class BytecodeCompiler {
                 } else {
                     // Array iteration: for item in arr
                     this.compileExpression(stmt.iterable);
-                    const arrVarName = `__arr_${stmt.variable}_${stmt.pos.line}`;
+                    const arrVarName = `__arr_${stmt.variable}_${stmt.pos.line}_${stmt.pos.column}`;
                     const arrVarIdx = this.chunk.addConstant(arrVarName);
                     this.chunk.emit(OpCode.OP_DEFINE_LET, arrVarIdx, stmt.pos);
 
                     // Index variable
                     const zeroIdx = this.chunk.addConstant(0);
                     this.chunk.emit(OpCode.OP_LOAD_CONST, zeroIdx, stmt.pos);
-                    const idxVarName = `__idx_${stmt.variable}_${stmt.pos.line}`;
+                    const idxVarName = `__idx_${stmt.variable}_${stmt.pos.line}_${stmt.pos.column}`;
                     const idxVarIdx = this.chunk.addConstant(idxVarName);
                     this.chunk.emit(OpCode.OP_DEFINE_MUT, idxVarIdx, stmt.pos);
 
                     const loopStart = this.chunk.instructions.length;
                     const loopCtx: LoopContext = {
-                        continueTarget: loopStart,
+                        continueJumps: [],
                         breakJumps: [],
                     };
                     this.loopStack.push(loopCtx);
@@ -204,6 +233,7 @@ export class BytecodeCompiler {
                     // Increment idx: idx = idx + 1
                     const continueStep = this.chunk.instructions.length;
                     loopCtx.continueTarget = continueStep;
+
                     this.chunk.emit(OpCode.OP_GET_VAR, idxVarIdx, stmt.pos);
                     const oneIdx = this.chunk.addConstant(1);
                     this.chunk.emit(OpCode.OP_LOAD_CONST, oneIdx, stmt.pos);
@@ -213,6 +243,10 @@ export class BytecodeCompiler {
                     this.chunk.emit(OpCode.OP_LOOP, loopStart, stmt.pos);
                     const loopEnd = this.chunk.instructions.length;
                     this.chunk.patchJump(exitJump, loopEnd);
+
+                    for (const continueJump of loopCtx.continueJumps) {
+                        this.chunk.patchJump(continueJump, continueStep);
+                    }
 
                     for (const breakJump of loopCtx.breakJumps) {
                         this.chunk.patchJump(breakJump, loopEnd);
@@ -238,13 +272,15 @@ export class BytecodeCompiler {
                     throw new BytecodeCompilationError("Continue statement outside of loop", stmt.pos);
                 }
                 const currentLoop = this.loopStack[this.loopStack.length - 1]!;
-                this.chunk.emit(OpCode.OP_LOOP, currentLoop.continueTarget, stmt.pos);
+                const jumpIdx = this.chunk.emit(OpCode.OP_JUMP, 0, stmt.pos);
+                currentLoop.continueJumps.push(jumpIdx);
                 break;
             }
 
             case "FunctionDeclaration": {
+                this.functionDepth++;
                 const fnBodyChunk = new Chunk();
-                fnBodyChunk.constants = this.chunk.constants; // Share global constants pool
+                fnBodyChunk.constants = this.chunk.constants; // Share constants pool
 
                 // Define params in function scope
                 for (let i = stmt.parameters.length - 1; i >= 0; i--) {
@@ -253,7 +289,7 @@ export class BytecodeCompiler {
                     fnBodyChunk.emit(OpCode.OP_DEFINE_MUT, paramIdx, stmt.pos);
                 }
 
-                // Swap chunk to compile function body directly
+                // Swap chunk to compile function body
                 const outerChunk = this.chunk;
                 const outerLoopStack = this.loopStack;
                 this.chunk = fnBodyChunk;
@@ -271,6 +307,7 @@ export class BytecodeCompiler {
                 // Restore outer chunk
                 this.chunk = outerChunk;
                 this.loopStack = outerLoopStack;
+                this.functionDepth--;
 
                 const fnIndex = this.chunk.functions.length;
                 this.chunk.functions.push({
@@ -292,6 +329,9 @@ export class BytecodeCompiler {
             }
 
             case "ReturnStatement": {
+                if (this.functionDepth === 0) {
+                    throw new BytecodeCompilationError("Return statement outside of function", stmt.pos);
+                }
                 if (stmt.argument) {
                     this.compileExpression(stmt.argument);
                 } else {
@@ -331,8 +371,13 @@ export class BytecodeCompiler {
             }
 
             case "Identifier": {
-                const idx = this.chunk.addConstant(expr.name);
-                this.chunk.emit(OpCode.OP_GET_VAR, idx, expr.pos);
+                if (expr.name === "null") {
+                    const idx = this.chunk.addConstant(null);
+                    this.chunk.emit(OpCode.OP_LOAD_CONST, idx, expr.pos);
+                } else {
+                    const idx = this.chunk.addConstant(expr.name);
+                    this.chunk.emit(OpCode.OP_GET_VAR, idx, expr.pos);
+                }
                 break;
             }
 
@@ -352,6 +397,30 @@ export class BytecodeCompiler {
             }
 
             case "BinaryExpression": {
+                if (expr.operator === "and") {
+                    // a and b: evaluate a; if false, jump to end (preserving false); else pop and evaluate b
+                    this.compileExpression(expr.left);
+                    this.chunk.emit(OpCode.OP_DUP, undefined, expr.pos);
+                    const jumpFalseIdx = this.chunk.emit(OpCode.OP_JUMP_IF_FALSE, 0, expr.pos);
+                    this.chunk.emit(OpCode.OP_POP, undefined, expr.pos);
+                    this.compileExpression(expr.right);
+                    const endIdx = this.chunk.instructions.length;
+                    this.chunk.patchJump(jumpFalseIdx, endIdx);
+                    break;
+                }
+
+                if (expr.operator === "or") {
+                    // a or b: evaluate a; if true, jump to end (preserving true); else pop and evaluate b
+                    this.compileExpression(expr.left);
+                    this.chunk.emit(OpCode.OP_DUP, undefined, expr.pos);
+                    const jumpTrueIdx = this.chunk.emit(OpCode.OP_JUMP_IF_TRUE, 0, expr.pos);
+                    this.chunk.emit(OpCode.OP_POP, undefined, expr.pos);
+                    this.compileExpression(expr.right);
+                    const endIdx = this.chunk.instructions.length;
+                    this.chunk.patchJump(jumpTrueIdx, endIdx);
+                    break;
+                }
+
                 this.compileExpression(expr.left);
                 this.compileExpression(expr.right);
 
@@ -368,8 +437,14 @@ export class BytecodeCompiler {
                     case "/":
                         this.chunk.emit(OpCode.OP_DIV, undefined, expr.pos);
                         break;
+                    case "//":
+                        this.chunk.emit(OpCode.OP_IDIV, undefined, expr.pos);
+                        break;
                     case "%":
                         this.chunk.emit(OpCode.OP_MOD, undefined, expr.pos);
+                        break;
+                    case "**":
+                        this.chunk.emit(OpCode.OP_POW, undefined, expr.pos);
                         break;
                     case "==":
                         this.chunk.emit(OpCode.OP_EQ, undefined, expr.pos);
@@ -389,12 +464,6 @@ export class BytecodeCompiler {
                     case ">=":
                         this.chunk.emit(OpCode.OP_GTE, undefined, expr.pos);
                         break;
-                    case "and":
-                        this.chunk.emit(OpCode.OP_AND, undefined, expr.pos);
-                        break;
-                    case "or":
-                        this.chunk.emit(OpCode.OP_OR, undefined, expr.pos);
-                        break;
                 }
                 break;
             }
@@ -410,96 +479,48 @@ export class BytecodeCompiler {
             }
 
             case "CallExpression": {
-                if (expr.callee === "print" || expr.callee === "println") {
-                    for (const arg of expr.arguments) {
-                        this.compileExpression(arg);
-                        this.chunk.emit(OpCode.OP_PRINT, undefined, expr.pos);
+                const argc = expr.arguments.length;
+
+                // Check builtin registry
+                if (BUILTINS_MAP.has(expr.callee)) {
+                    const builtin = BUILTINS_MAP.get(expr.callee)!;
+                    if (argc < builtin.arity[0] || argc > builtin.arity[1]) {
+                        throw new BytecodeCompilationError(
+                            `Built-in '${expr.callee}' expects between ${builtin.arity[0]} and ${builtin.arity[1]} arguments, got ${argc}`,
+                            expr.pos
+                        );
                     }
-                    const nullIdx = this.chunk.addConstant(null);
-                    this.chunk.emit(OpCode.OP_LOAD_CONST, nullIdx, expr.pos);
-                } else if (
-                    [
-                        "sqrt",
-                        "abs",
-                        "min",
-                        "max",
-                        "floor",
-                        "ceil",
-                        "round",
-                        "sin",
-                        "cos",
-                        "pow",
-                        "log",
-                    ].includes(expr.callee)
-                ) {
                     for (const arg of expr.arguments) {
                         this.compileExpression(arg);
                     }
-                    const mathIdx = this.chunk.addConstant(expr.callee);
-                    this.chunk.emit(OpCode.OP_MATH_CALL, mathIdx, expr.pos);
-                } else if (expr.callee === "push") {
-                    for (const arg of expr.arguments) {
-                        this.compileExpression(arg);
-                    }
-                    this.chunk.emit(OpCode.OP_ARRAY_PUSH, undefined, expr.pos);
-                } else if (expr.callee === "pop") {
-                    for (const arg of expr.arguments) {
-                        this.compileExpression(arg);
-                    }
-                    this.chunk.emit(OpCode.OP_ARRAY_POP, undefined, expr.pos);
-                } else if (expr.callee === "len" || expr.callee === "length") {
-                    for (const arg of expr.arguments) {
-                        this.compileExpression(arg);
-                    }
-                    this.chunk.emit(OpCode.OP_ARRAY_LEN, undefined, expr.pos);
-                } else if (expr.callee === "sort") {
-                    for (const arg of expr.arguments) {
-                        this.compileExpression(arg);
-                    }
-                    this.chunk.emit(OpCode.OP_ARRAY_SORT, undefined, expr.pos);
-                } else if (expr.callee === "reverse") {
-                    for (const arg of expr.arguments) {
-                        this.compileExpression(arg);
-                    }
-                    this.chunk.emit(OpCode.OP_ARRAY_REVERSE, undefined, expr.pos);
-                } else if (expr.callee === "swap") {
-                    for (const arg of expr.arguments) {
-                        this.compileExpression(arg);
-                    }
-                    this.chunk.emit(OpCode.OP_ARRAY_SWAP, undefined, expr.pos);
-                } else if (expr.callee === "slice") {
-                    for (const arg of expr.arguments) {
-                        this.compileExpression(arg);
-                    }
-                    this.chunk.emit(OpCode.OP_ARRAY_SLICE, undefined, expr.pos);
-                } else if (expr.callee === "contains") {
-                    for (const arg of expr.arguments) {
-                        this.compileExpression(arg);
-                    }
-                    this.chunk.emit(OpCode.OP_ARRAY_CONTAINS, undefined, expr.pos);
-                } else if (expr.callee === "index_of") {
-                    for (const arg of expr.arguments) {
-                        this.compileExpression(arg);
-                    }
-                    this.chunk.emit(OpCode.OP_ARRAY_INDEX_OF, undefined, expr.pos);
-                } else if (expr.callee === "fill") {
-                    for (const arg of expr.arguments) {
-                        this.compileExpression(arg);
-                    }
-                    this.chunk.emit(OpCode.OP_ARRAY_FILL, undefined, expr.pos);
-                } else if (expr.callee === "sum") {
-                    for (const arg of expr.arguments) {
-                        this.compileExpression(arg);
-                    }
-                    this.chunk.emit(OpCode.OP_ARRAY_SUM, undefined, expr.pos);
-                } else {
-                    // General function call
-                    for (const arg of expr.arguments) {
-                        this.compileExpression(arg);
-                    }
-                    const calleeIdx = this.chunk.addConstant(expr.callee);
-                    this.chunk.emit(OpCode.OP_CALL, calleeIdx, expr.pos);
+                    const callInfoIdx = this.chunk.addConstant({
+                        name: expr.callee,
+                        argc,
+                    });
+                    this.chunk.emit(OpCode.OP_CALL_BUILTIN, callInfoIdx, expr.pos);
+                    break;
                 }
+
+                // Check known user function declaration arity at compile time
+                if (this.declaredFunctions.has(expr.callee)) {
+                    const expectedArity = this.declaredFunctions.get(expr.callee)!;
+                    if (argc !== expectedArity) {
+                        throw new BytecodeCompilationError(
+                            `Function '${expr.callee}' expects ${expectedArity} arguments, got ${argc}`,
+                            expr.pos
+                        );
+                    }
+                }
+
+                // General function call
+                for (const arg of expr.arguments) {
+                    this.compileExpression(arg);
+                }
+                const calleeIdx = this.chunk.addConstant({
+                    name: expr.callee,
+                    argc,
+                });
+                this.chunk.emit(OpCode.OP_CALL, calleeIdx, expr.pos);
                 break;
             }
 

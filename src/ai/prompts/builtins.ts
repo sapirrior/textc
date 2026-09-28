@@ -1,27 +1,39 @@
-export const BUILTIN_LIBRARY = `BUILT-IN FUNCTION LIBRARY:
-1. Array & Collection Built-ins:
-   - len(arr): returns length of array or string
-   - push(arr, item): appends item to array
-   - pop(arr): removes and returns last element
-   - swap(arr, i, j): swaps arr[i] and arr[j] in-place
-   - slice(arr, start, end): returns sub-array or substring
-   - reverse(arr): reverses array in-place
-   - sort(arr): sorts array in ascending order in-place
-   - contains(arr, item): true if item is in array or string
-   - index_of(arr, item): returns index of item or -1
-   - fill(count, value): creates array of length count with value
-   - sum(arr): returns sum of all elements in numeric array
+import { BUILTINS } from "../../stdlib/registry";
 
-2. Extended Math Built-ins:
-   - pow(base, exp), sqrt(num), abs(num)
-   - floor(num), ceil(num), round(num)
-   - min(a, b) or min(arr), max(a, b) or max(arr)
-   - gcd(a, b), lcm(a, b)
+export function generateBuiltinPrompt(): string {
+    const lines = ["BUILT-IN FUNCTION LIBRARY:"];
 
-3. String & Conversion Built-ins:
-   - split(str, delimiter), join(arr, delimiter), char_at(str, index)
-   - to_int(val), to_float(val), to_str(val)
+    // Group built-ins
+    const collections = ["len", "push", "pop", "swap", "slice", "reverse", "sort", "contains", "index_of", "fill", "sum"];
+    const math = ["pow", "sqrt", "abs", "floor", "ceil", "round", "min", "max", "sin", "cos", "log", "gcd", "lcm"];
+    const strings = ["split", "join", "char_at", "to_int", "to_float", "to_str"];
+    const io = ["assert", "print", "println"];
 
-4. Output & Invariants:
-   - assert(condition, message): runtime safety check
-   - print(val) / println(val): outputs result to standard output`;
+    lines.push("1. Array & Collection Built-ins:");
+    for (const name of collections) {
+        const b = BUILTINS.find((x) => x.name === name);
+        if (b) lines.push(`   - ${b.sig}: ${b.doc}`);
+    }
+
+    lines.push("\n2. Math Built-ins:");
+    for (const name of math) {
+        const b = BUILTINS.find((x) => x.name === name);
+        if (b) lines.push(`   - ${b.sig}: ${b.doc}`);
+    }
+
+    lines.push("\n3. String & Conversion Built-ins:");
+    for (const name of strings) {
+        const b = BUILTINS.find((x) => x.name === name);
+        if (b) lines.push(`   - ${b.sig}: ${b.doc}`);
+    }
+
+    lines.push("\n4. Output & Invariants:");
+    for (const name of io) {
+        const b = BUILTINS.find((x) => x.name === name);
+        if (b) lines.push(`   - ${b.sig}: ${b.doc}`);
+    }
+
+    return lines.join("\n");
+}
+
+export const BUILTIN_LIBRARY = generateBuiltinPrompt();
