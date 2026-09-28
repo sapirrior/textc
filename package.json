@@ -1,6 +1,6 @@
 {
   "name": "text-compiler",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Execute small algorithms written in natural language, pseudocode, flow-style instructions, or any human-friendly form",
   "homepage": "https://github.com/sapirrior/textc#readme",
   "bugs": {
