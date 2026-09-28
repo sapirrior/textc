@@ -19,12 +19,14 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "keywords": [
     "compiler",
     "ai-compiler",
     "textc",
+    "text-compiler",
     "bytecode",
     "virtual-machine",
     "algorithms",
@@ -34,7 +36,8 @@
     "test": "echo \"No test specified\"",
     "dev": "bun --watch ./src/main.ts",
     "typecheck": "bun check ./src/main.ts",
-    "build": "bun build --target=node --outfile=dist/textc.js ./src/main.ts",
+    "build": "bun build --target=node --outfile=dist/textc.js ./src/main.ts && chmod +x dist/textc.js",
+    "prepublishOnly": "bun run build",
     "start": "bun run dist/textc.js"
   },
   "dependencies": {
